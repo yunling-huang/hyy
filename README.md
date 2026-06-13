@@ -67,15 +67,80 @@ data_analysis_camp/
 
 ## ☁️ 一键部署到云端
 
-### 方案 A：Streamlit Community Cloud（5 分钟免费）
+### 方案 A：Cloudflare Tunnel（**推荐 · 零成本 · 全球 CDN**）
 
-1. 推送到 GitHub（见下方「推送到 GitHub）
+> 最适合你：本地/服务器运行 Streamlit + Cloudflare 边缘网络暴露公网
+> 无需公网 IP，自带 HTTPS、DDoS 防护、全球 CDN
+
+**快速三步：**
+
+```bash
+# 1. 进入项目目录
+cd data_analysis_camp
+
+# 2. 一键启动（会提示你粘贴 Cloudflare Tunnel Token）
+./deploy.sh cloudflare
+
+# 或直接带 Token
+./deploy.sh cloudflare 你的TunnelToken
+```
+
+**获取 Cloudflare Tunnel Token 的步骤：**
+
+1. 打开 https://one.dash.cloudflare.com → 登录你的 Cloudflare 账号
+2. 左侧：**Networks** → **Tunnels**
+3. 点击 **+ Create a tunnel** → 选择 **Cloudflared** → Next
+4. 输入名称，例如 `py-camp` → **Save**
+5. 在 "Install and run connector" 里选 **Docker**
+6. 复制命令里 `--token` 后面那一大串字符（形如 `eyJhbGciOi...`）
+7. 粘贴到终端或写入 `.env` 文件的 `CLOUDFLARED_TOKEN=`
+8. 回到 Cloudflare Tunnel 页面 → 你的 Tunnel 已显示绿色 Healthy
+9. 点 Public Hostnames → Add a public hostname
+10. 填写：
+    - **Subdomain**（可选）：`py-camp`
+    - **Domain**：选择你在 Cloudflare 托管的域名
+    - **Path**：留空
+    - **Type**：`HTTP`
+    - **URL**：`streamlit:8501`
+11. **Save hostname**
+12. 约 1 分钟后，访问 `https://py-camp.your-domain.com` 即可
+
+**启动/停止命令：**
+
+```bash
+# 启动
+cd data_analysis_camp
+docker compose up -d --build
+
+# 查看日志
+docker compose logs -f
+
+# 停止
+docker compose down
+
+# 更新代码
+docker compose down
+git pull
+docker compose up -d --build
+```
+
+**文件说明：**
+
+| 文件 | 作用 |
+|---|---|
+| `docker-compose.yml` | 同时启动 Streamlit + Cloudflared 两个容器 |
+| `.env.example` | 环境变量模板（复制为 `.env` 并填入 Token） |
+| `.cloudflared/config.yml` | 备用配置文件（通常不需要，推荐用 Token 方式） |
+
+### 方案 B：Streamlit Community Cloud（5 分钟免费）
+
+1. 推送到 GitHub（见下方「推送到 GitHub」）
 2. 打开 https://streamlit.io/cloud → Sign up with GitHub
 3. 点 **New app** → 选择你的仓库 → Branch: `main` → Main file path: `frontend/app.py`
 4. 点 **Deploy!** 自动识别 `requirements.txt` 安装依赖
 5. 得到形如 `https://<你的项目>.streamlit.app` 的公开访问链接
 
-### 方案 B：Docker 部署（任意云服务器）
+### 方案 C：Docker 部署（任意云服务器）
 
 ```bash
 # 构建
@@ -87,7 +152,7 @@ docker run -d -p 8501:8501 --name camp --restart always py-camp
 
 浏览器访问 http://服务器IP:8501
 
-### 方案 C：Ubuntu / CentOS 云服务器
+### 方案 D：Ubuntu / CentOS 云服务器
 
 ```bash
 # 1. 拉取代码

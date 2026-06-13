@@ -43,3 +43,8 @@ data/*.xlsx
 
 # Docker
 *.pid
+
+# Cloudflare - 不提交真实 Token 和凭证
+.env
+.cloudflared/*.json
+.cloudflared/cert.pem

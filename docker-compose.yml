@@ -1,0 +1,66 @@
+# =============================================================
+# 🧊 AI 时代 Python 数据分析训练营 - Cloudflare 一键部署
+# 功能：同时启动 Streamlit + Cloudflare Tunnel
+#
+# 使用步骤：
+#   1. 去 Cloudflare Zero Trust 创建一个 Tunnel
+#      （https://one.dash.cloudflare.com → Networks → Tunnels）
+#   2. 创建完成后，复制形如 "cloudflared.exe service install <long_token>"
+#      里的那串很长的 Token
+#   3. 把 Token 填入下面的 CLOUDFLARED_TOKEN 处，或写入 .env 文件
+#   4. 启动：docker compose up -d
+#   5. Cloudflare Tunnel 配置页，把 Hostname 指向 http://streamlit:8501
+#      Public Hostname 设置：
+#         Subdomain: py-camp（或留空）
+#         Domain: 你在 Cloudflare 的域名
+#         Path: 留空
+#         Service Type: HTTP
+#         URL: streamlit:8501
+# =============================================================
+
+services:
+
+  # 服务 1：Streamlit 应用
+  streamlit:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: py-camp-streamlit
+    restart: unless-stopped
+    volumes:
+      # 挂载数据目录，确保学习进度持久化
+      - ./data:/app/data
+      - ./data_analysis_camp.db:/app/data_analysis_camp.db:rw
+    # 暴露给本机调试（可选；生产环境建议只通过 cloudflared 暴露）
+    ports:
+      - "127.0.0.1:8501:8501"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    environment:
+      - TZ=Asia/Shanghai
+    networks:
+      - camp-network
+
+  # 服务 2：Cloudflare Tunnel（把 streamlit:8501 暴露到公网）
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: py-camp-cloudflared
+    restart: unless-stopped
+    depends_on:
+      streamlit:
+        condition: service_healthy
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARED_TOKEN}
+    environment:
+      - TZ=Asia/Shanghai
+      - CLOUDFLARED_TOKEN=${CLOUDFLARED_TOKEN}
+    networks:
+      - camp-network
+
+# Docker 内部网络（两个容器通过服务名互通）
+networks:
+  camp-network:
+    driver: bridge

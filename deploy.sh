@@ -2,10 +2,11 @@
 # =============================================================
 # 🧊 AI 时代 Python 数据分析训练营 - 一键部署脚本
 # 用法：
-#   ./deploy.sh                  → 交互式选择
-#   ./deploy.sh local            → 本地直接运行
-#   ./deploy.sh docker           → Docker 构建 + 运行
-#   ./deploy.sh push YOUR_TOKEN  → 推送到 GitHub
+#   ./deploy.sh                      → 交互式选择
+#   ./deploy.sh local                → 本地直接运行
+#   ./deploy.sh docker               → Docker 构建 + 运行
+#   ./deploy.sh cloudflare [TOKEN]   → Cloudflare Tunnel 一键部署（推荐）
+#   ./deploy.sh push YOUR_TOKEN      → 推送到 GitHub
 # =============================================================
 set -e
 
@@ -168,6 +169,114 @@ push_to_github() {
 }
 
 # =============================================================
+# 模式 4：Cloudflare Tunnel 一键部署（推荐）
+# =============================================================
+deploy_cloudflare() {
+    echo -e "${YELLOW}[1/5]${NC} 检查 Docker 和 docker compose..."
+    if ! command -v docker >/dev/null 2>&1; then
+        echo -e "${RED}❌ Docker 未安装。请先安装：https://docs.docker.com/engine/install/${NC}"
+        exit 1
+    fi
+    # 兼容 docker compose v2 与 docker-compose v1
+    if docker compose version >/dev/null 2>&1; then
+        COMPOSE_CMD="docker compose"
+        echo -e "  ✅ $($COMPOSE_CMD version --short)"
+    elif command -v docker-compose >/dev/null 2>&1; then
+        COMPOSE_CMD="docker-compose"
+        echo -e "  ✅ $($COMPOSE_CMD version --short)"
+    else
+        echo -e "${RED}❌ docker compose 未安装${NC}"
+        exit 1
+    fi
+
+    echo ""
+    echo -e "${YELLOW}[2/5]${NC} 准备 Cloudflare Tunnel Token..."
+
+    # 优先用参数传入的 token，其次检查 .env 文件，最后交互式输入
+    if [ -n "$TOKEN" ]; then
+        CF_TOKEN="$TOKEN"
+        echo "  → 使用参数传入的 Token"
+    elif [ -f .env ] && grep -q "^CLOUDFLARED_TOKEN=" .env 2>/dev/null; then
+        CF_TOKEN=$(grep "^CLOUDFLARED_TOKEN=" .env | head -1 | cut -d'=' -f2-)
+        if [ -n "$CF_TOKEN" ] && [ "$CF_TOKEN" != "your-cloudflared-tunnel-token-here" ]; then
+            echo "  → 从 .env 文件读取 Token"
+        else
+            CF_TOKEN=""
+        fi
+    fi
+
+    if [ -z "$CF_TOKEN" ]; then
+        echo ""
+        echo "  请从 Cloudflare Zero Trust 获取 Tunnel Token："
+        echo "    1) 打开 https://one.dash.cloudflare.com"
+        echo "    2) Networks → Tunnels → Create a tunnel → Cloudflared"
+        echo "    3) 命名（如 py-camp）→ Save"
+        echo "    4) 选择 Docker → 复制 --token 后面那一大串字符"
+        echo ""
+        read -rp "  粘贴 Tunnel Token： " CF_TOKEN
+        if [ -z "$CF_TOKEN" ]; then
+            echo -e "${RED}❌ 未提供 Token，已取消${NC}"
+            exit 1
+        fi
+    fi
+
+    # 写入 .env（如果不存在则从 .env.example 创建）
+    if [ ! -f .env ]; then
+        cp .env.example .env
+    fi
+    # 替换掉占位 Token
+    if grep -q "^CLOUDFLARED_TOKEN=" .env 2>/dev/null; then
+        # macOS / Linux 兼容写法
+        sed -i.bak "s|^CLOUDFLARED_TOKEN=.*|CLOUDFLARED_TOKEN=$CF_TOKEN|" .env 2>/dev/null \
+            || sed "s|^CLOUDFLARED_TOKEN=.*|CLOUDFLARED_TOKEN=$CF_TOKEN|" .env > .env.tmp && mv .env.tmp .env
+        rm -f .env.bak
+    else
+        echo "CLOUDFLARED_TOKEN=$CF_TOKEN" >> .env
+    fi
+    echo -e "  ✅ Token 已写入 .env 文件"
+
+    echo ""
+    echo -e "${YELLOW}[3/5]${NC} 停止并清理旧容器..."
+    $COMPOSE_CMD down 2>/dev/null || true
+
+    echo ""
+    echo -e "${YELLOW}[4/5]${NC} 构建并启动容器（Streamlit + Cloudflared）..."
+    $COMPOSE_CMD up -d --build
+
+    echo ""
+    echo -e "${YELLOW}[5/5]${NC} 健康检查..."
+    sleep 5
+    STREAMLIT_STATUS=$(docker inspect -f '{{.State.Health.Status}}' py-camp-streamlit 2>/dev/null || echo "unknown")
+    TUNNEL_STATUS=$(docker inspect -f '{{.State.Status}}' py-camp-cloudflared 2>/dev/null || echo "unknown")
+
+    echo ""
+    echo -e "${GREEN}✅ Cloudflare Tunnel 部署完成！${NC}"
+    echo ""
+    echo "  容器状态："
+    echo "    · Streamlit 应用：$STREAMLIT_STATUS → http://127.0.0.1:8501"
+    echo "    · Cloudflare Tunnel：$TUNNEL_STATUS"
+    echo ""
+    echo "  📌 接下来在 Cloudflare 控制台配置 Public Hostname："
+    echo "    1) 打开你的 Tunnel 详情页 → 选 Public Hostnames 标签"
+    echo "    2) 点 Add a public hostname"
+    echo "    3) 填写："
+    echo "       · Subdomain（可选）：py-camp"
+    echo "       · Domain：选择你在 Cloudflare 的域名（如 your-domain.com）"
+    echo "       · Path：留空"
+    echo "       · Type：HTTP"
+    echo "       · URL：streamlit:8501"
+    echo "    4) Save hostname"
+    echo ""
+    echo "  🔗 访问地址：https://py-camp.your-domain.com"
+    echo ""
+    echo "  常用命令："
+    echo "    · 查看日志：$COMPOSE_CMD logs -f"
+    echo "    · 停止服务：$COMPOSE_CMD down"
+    echo "    · 重启服务：$COMPOSE_CMD restart"
+    echo "    · 更新代码：$COMPOSE_CMD down → git pull → $COMPOSE_CMD up -d --build"
+}
+
+# =============================================================
 # 主逻辑
 # =============================================================
 case "$MODE" in
@@ -177,26 +286,33 @@ case "$MODE" in
     docker)
         run_docker
         ;;
+    cloudflare)
+        deploy_cloudflare
+        ;;
     push)
         push_to_github
         ;;
     "")
         echo "可用模式："
-        echo "  ./deploy.sh local                 → 本地运行 http://localhost:8501"
-        echo "  ./deploy.sh docker                → Docker 构建 + 运行"
-        echo "  ./deploy.sh push  [GITHUB_TOKEN]  → 推送到 GitHub"
+        echo "  ./deploy.sh local                          → 本地运行 http://localhost:8501"
+        echo "  ./deploy.sh docker                         → Docker 构建 + 运行"
+        echo "  ./deploy.sh cloudflare [TUNNEL_TOKEN]      → Cloudflare Tunnel 一键部署（推荐）"
+        echo "  ./deploy.sh push     [GITHUB_TOKEN]        → 推送到 GitHub"
         echo ""
-        read -rp "请输入模式： " mode_choice
+        echo "  1 = local     2 = docker     3 = cloudflare     4 = push"
+        echo ""
+        read -rp "请输入模式编号或名称： " mode_choice
         case "$mode_choice" in
             1|local) run_local ;;
             2|docker) run_docker ;;
-            3|push) push_to_github ;;
+            3|cloudflare|cf) deploy_cloudflare ;;
+            4|push) push_to_github ;;
             *) echo -e "${RED}❌ 无效选择${NC}"; exit 1 ;;
         esac
         ;;
     *)
         echo -e "${RED}❌ 未知模式：$MODE${NC}"
-        echo "支持：local / docker / push"
+        echo "支持：local / docker / cloudflare / push"
         exit 1
         ;;
 esac

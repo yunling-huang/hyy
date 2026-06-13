@@ -1,0 +1,25 @@
+# =============================================================
+# Cloudflare Tunnel 配置 - 把本地 Streamlit 暴露到公网
+# 用法：
+#   1. 在 Cloudflare Zero Trust 创建 Tunnel
+#   2. 把 Token 填入下方
+#   3. 或直接运行：cloudflared tunnel run --token <你的Token>
+# =============================================================
+
+# --- Tunnel 名称（在 Cloudflare Zero Trust 创建时设置） ---
+tunnel: your-tunnel-name
+
+# --- Tunnel 的凭证文件路径（Docker 方式下通过 TOKEN 环境变量传入即可，不用此文件） ---
+# credentials-file: /home/<user>/.cloudflared/<uuid>.json
+
+# --- 入站配置（监听 Cloudflare 边缘流量） ---
+ingress:
+  # 规则 1：所有流量转发到本地 Streamlit
+  - hostname: your-domain.com   # 例：py-camp.your-domain.com
+    service: http://localhost:8501
+
+  # 规则 2：兜底（必填），任何未匹配到的请求返回 404
+  - service: http_status:404
+
+# --- 可选：日志级别 ---
+# loglevel: info
